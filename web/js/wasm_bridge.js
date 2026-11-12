@@ -5,7 +5,7 @@ export async function initWasmEngine(particleCount) {
   const { hv_transform_point, hv_calc_market_hbi, hv_transform_batch, memory } = instance.exports;
 
   if (memory.buffer.byteLength < 1024 * 1024) {
-    memory.grow(16);
+    memory.grow(96);
   }
 
   const outPtrX = 1024, outPtrY = 1032, outPtrScale = 1040;
@@ -22,12 +22,15 @@ export async function initWasmEngine(particleCount) {
   const f64View = new Float64Array(memory.buffer);
 
   return {
+    exports: instance.exports,
+    memory: memory,
     transformPoint(zx, zy, cx, cy, panX) {
       const isPole = hv_transform_point(zx, zy, cx, cy, panX, outPtrX, outPtrY, outPtrScale);
+      const view = new Float64Array(memory.buffer);
       return {
-        x: f64View[outPtrX / 8],
-        y: f64View[outPtrY / 8],
-        scale: f64View[outPtrScale / 8],
+        x: view[outPtrX / 8],
+        y: view[outPtrY / 8],
+        scale: view[outPtrScale / 8],
         isPole: isPole === 1
       };
     },

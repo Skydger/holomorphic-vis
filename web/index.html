@@ -45,6 +45,19 @@
     <button data-mode="splines">2. Конформные сплайны</button>
     <button data-mode="newton">3. Бассейны Ньютона (GPU)</button>
     <button data-mode="stress">4. Гистограмма + 5 000 частиц</button>
+    <button data-mode="vision">5. 2D-строки Чэна (Анализ фото)</button>
+  </div>
+
+  <div id="vision-controls" style="display:none; margin-bottom: 10px; gap: 10px; align-items: center; flex-wrap: wrap;">
+    <label style="font-family: monospace; font-size: 0.8rem; color: #38bdf8;">
+      Ракурс 1: <input type="file" id="photo-upload-1" accept="image/*" style="color: #94a3b8; width: 170px;">
+    </label>
+    <label style="font-family: monospace; font-size: 0.8rem; color: #10b981;">
+      Ракурс 2 (для 3D): <input type="file" id="photo-upload-2" accept="image/*" style="color: #94a3b8; width: 170px;">
+    </label>
+    <label style="font-family: monospace; font-size: 0.8rem;">
+      Порог: <input type="range" id="luma-thresh" min="140" max="245" value="195" style="width: 90px;">
+    </label>
   </div>
 
   <div class="viewport" id="viewport">

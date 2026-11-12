@@ -1,6 +1,7 @@
 import { initWasmEngine } from './wasm_bridge.js';
 import { createNewtonRenderer } from './gpu_shader.js';
 import { drawCandles, drawSplines, drawStress } from './renderers.js';
+import { setupVisionModule } from './vision_renderer.js';
 
 const CFG = { w: 820, h: 620, scale: 160, cx: 410, cy: 255 };
 const glCanvas = document.getElementById('gl-canvas');
@@ -8,6 +9,7 @@ const batchCanvas = document.getElementById('batch-canvas');
 const bCtx = batchCanvas.getContext('2d');
 const svg = document.getElementById('vector-layer');
 const hud = document.getElementById('hud');
+const visionControls = document.getElementById('vision-controls');
 
 const drawNewtonGPU = createNewtonRenderer(glCanvas, CFG.w, CFG.h, CFG.scale);
 
@@ -49,6 +51,9 @@ async function start() {
     engine.uploadParticles(pInX, pInY);
     candles.forEach(c => { c.hbi = engine.calcHBI(c.delta, c.vol); });
 
+    // Инициализация модуля компьютерного зрения Чэна
+    const renderVision = setupVisionModule(engine.exports, engine.memory, batchCanvas, bCtx, hud);
+
     const render = () => {
       if (state.mode === 'candles') {
         hud.innerHTML = drawCandles(svg, engine, candles, state, CFG);
@@ -56,6 +61,8 @@ async function start() {
         hud.innerHTML = drawSplines(svg, engine, state, CFG);
       } else if (state.mode === 'stress') {
         hud.innerHTML = drawStress(bCtx, engine, histData, PARTICLE_COUNT, state, CFG);
+      } else if (state.mode === 'vision') {
+        renderVision();
       } else if (state.mode === 'newton') {
         const t0 = performance.now();
         drawNewtonGPU(state.cx, state.cy);
@@ -72,17 +79,25 @@ async function start() {
         document.querySelectorAll('.tabs button').forEach(b => b.classList.remove('active'));
         e.target.classList.add('active');
         state.mode = e.target.dataset.mode;
+
         glCanvas.style.display = state.mode === 'newton' ? 'block' : 'none';
-        batchCanvas.style.display = state.mode === 'stress' ? 'block' : 'none';
-        svg.style.display = state.mode === 'stress' ? 'none' : 'block';
+        batchCanvas.style.display = (state.mode === 'stress' || state.mode === 'vision') ? 'block' : 'none';
+        svg.style.display = (state.mode === 'stress' || state.mode === 'vision') ? 'none' : 'block';
+        visionControls.style.display = state.mode === 'vision' ? 'flex' : 'none';
+
         render();
       });
     });
 
     const vp = document.getElementById('viewport');
-    vp.addEventListener('mousedown', (e) => { state.dragging = true; state.lastX = e.clientX; });
+    vp.addEventListener('mousedown', (e) => {
+      if (state.mode === 'vision') return;
+      state.dragging = true;
+      state.lastX = e.clientX;
+    });
     window.addEventListener('mouseup', () => { state.dragging = false; });
     vp.addEventListener('mousemove', (e) => {
+      if (state.mode === 'vision') return;
       if (state.dragging) {
         state.panX = Math.max(-11, Math.min(11, state.panX - ((e.clientX - state.lastX) / CFG.scale) * 1.5));
         state.lastX = e.clientX;
@@ -95,6 +110,7 @@ async function start() {
       render();
     });
     vp.addEventListener('wheel', (e) => {
+      if (state.mode === 'vision') return;
       e.preventDefault();
       state.panX = Math.max(-11, Math.min(11, state.panX + e.deltaY * 0.003));
       render();
