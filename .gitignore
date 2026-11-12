@@ -1,0 +1,17 @@
+.dub
+bin/
+build/
+docs.json
+__dummy.html
+docs/
+web/engine.wasm
+
+*.exe
+*.pdb
+*.o
+*.obj
+*.lst
+*.dll
+*.so
+*.dylib
+

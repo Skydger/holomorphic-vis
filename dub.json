@@ -1,0 +1,12 @@
+{
+  "name": "holomorphic-vis",
+  "description": "Analytical visual computing engine based on Holomorphic Dynamics and S.-K. Chang principles",
+  "authors": ["Skydger"],
+  "license": "MIT",
+  "targetType": "dynamicLibrary",
+  "targetName": "holomorphic_vis",
+  "targetPath": "build",
+  "sourcePaths": ["source"],
+  "importPaths": ["source"],
+  "buildOptions": ["optimize", "inline", "releaseMode"]
+}
