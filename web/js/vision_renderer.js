@@ -1,24 +1,25 @@
 export function setupVisionModule(wasmExports, memory, batchCanvas, bCtx, hud) {
-  const { hv_detect_objects, hv_cross_ratio, hv_compute_3d_depth } = wasmExports;
+  const { hv_detect_objects, hv_compute_3d_depth, hv_auto_threshold, hv_count_pips } = wasmExports;
+
   let img1 = null;
   let img2 = null;
 
   const IMG_W = 820, IMG_H = 620;
   const imgPixels = IMG_W * IMG_H;
-  const requiredBytes = 1024 * 1024 + imgPixels * 12;
-  if (memory.buffer.byteLength < requiredBytes) {
-    memory.grow(Math.ceil((requiredBytes - memory.buffer.byteLength) / 65536));
-  }
 
   const ptrRgba     = 1024 * 1024;
   const ptrMask     = ptrRgba + imgPixels * 4;
   const ptrObjects1 = ptrMask + imgPixels * 4;
   const ptrObjects2 = ptrObjects1 + 32 * 48;
   const ptrOutZ     = ptrObjects2 + 32 * 48;
-  const ptrCrRe     = ptrOutZ + 32 * 8;
-  const ptrCrIm     = ptrCrRe + 8;
 
-  function detectOnImage(img, ptrObjs, thresh) {
+  function detectOnImage(img, ptrObjs) {
+    const neededBytes = ptrOutZ + 1024;
+    if (memory.buffer.byteLength < neededBytes) {
+      const pages = Math.ceil((neededBytes - memory.buffer.byteLength) / 65536);
+      memory.grow(pages);
+    }
+
     bCtx.fillStyle = "#020617";
     bCtx.fillRect(0, 0, IMG_W, IMG_H);
     const scale = Math.min(IMG_W / img.width, IMG_H / img.height);
@@ -27,12 +28,23 @@ export function setupVisionModule(wasmExports, memory, batchCanvas, bCtx, hud) {
 
     const imgData = bCtx.getImageData(0, 0, IMG_W, IMG_H);
     new Uint8Array(memory.buffer, ptrRgba, imgPixels * 4).set(imgData.data);
+
+    const autoCheck = document.getElementById('auto-fatou');
+    const slider = document.getElementById('luma-thresh');
+    const isAuto = autoCheck ? autoCheck.checked : false;
+
+    const thresh = isAuto ? hv_auto_threshold(ptrRgba, IMG_W, IMG_H) : parseInt(slider.value, 10);
+    if (isAuto && slider) slider.value = thresh;
+
     const count = hv_detect_objects(ptrRgba, IMG_W, IMG_H, thresh, 180, ptrObjs, 24, ptrMask);
 
     const view = new DataView(memory.buffer, ptrObjs);
     const list = [];
     for (let i = 0; i < count; i++) {
       const off = i * 48;
+      // Передаем в D указатель на текущую костяшку (ptrObjs + off) для подсчета точек
+      const pips = hv_count_pips(ptrRgba, IMG_W, IMG_H, ptrObjs + off, thresh);
+
       list.push({
         id:   view.getInt32(off + 0, true),
         cx:   view.getFloat64(off + 8, true),
@@ -41,21 +53,24 @@ export function setupVisionModule(wasmExports, memory, batchCanvas, bCtx, hud) {
         minY: view.getInt32(off + 28, true),
         maxX: view.getInt32(off + 32, true),
         maxY: view.getInt32(off + 36, true),
-        z:    0.0
+        z:    0.0,
+        pips: pips
       });
     }
-    return list;
+    return { list, usedThresh: thresh };
   }
 
   function build3DString(objects, hasStereo) {
     if (objects.length === 0) return { u: "пусто", v: "пусто", w: "пусто" };
 
+    const label = (o) => `O${o.id}(${o.pips}p)`;
+
     const sortAxis = (arr, getter, tol) => {
       const sorted = [...arr].sort((a, b) => getter(a) - getter(b));
-      let str = "O" + sorted.at(0).id;
+      let str = label(sorted.at(0));
       for (let i = 1; i < sorted.length; i++) {
         const diff = Math.abs(getter(sorted.at(i)) - getter(sorted.at(i - 1)));
-        str += (diff < tol ? " = " : " < ") + "O" + sorted.at(i).id;
+        str += (diff < tol ? " = " : " < ") + label(sorted.at(i));
       }
       return str;
     };
@@ -77,19 +92,17 @@ export function setupVisionModule(wasmExports, memory, batchCanvas, bCtx, hud) {
         return;
       }
 
-      const thresh = parseInt(document.getElementById('luma-thresh').value, 10);
       const t0 = performance.now();
 
-      // Если загружен второй ракурс — сначала детектируем его в ptrObjects2
-      let objs2 = [];
+      let res2 = { list: [], usedThresh: 0 };
       if (img2) {
-        objs2 = detectOnImage(img2, ptrObjects2, thresh);
+        res2 = detectOnImage(img2, ptrObjects2);
       }
 
-      // Затем детектируем основной Ракурс 1 в ptrObjects1 (он останется на экране)
-      const objs1 = detectOnImage(img1, ptrObjects1, thresh);
+      const res1 = detectOnImage(img1, ptrObjects1);
+      const objs1 = res1.list;
+      const objs2 = res2.list;
 
-      // Если есть оба ракурса — вычисляем 3D-высоту Z через параллакс в D-ядре
       let hasStereo = false;
       if (objs1.length >= 4 && objs2.length >= 4) {
         const valid = hv_compute_3d_depth(ptrObjects1, objs1.length, ptrObjects2, objs2.length, ptrOutZ);
@@ -102,7 +115,6 @@ export function setupVisionModule(wasmExports, memory, batchCanvas, bCtx, hud) {
 
       const dt = (performance.now() - t0).toFixed(2);
 
-      // Отрисовка рамок: лежащие (Z ~ 0) — зеленые, стоящие на ребре (Z > 0.4) — оранжевые
       objs1.forEach(obj => {
         const isStanding = hasStereo && obj.z > 0.45;
         bCtx.strokeStyle = isStanding ? "#f59e0b" : "#10b981";
@@ -116,7 +128,9 @@ export function setupVisionModule(wasmExports, memory, batchCanvas, bCtx, hud) {
 
         bCtx.fillStyle = isStanding ? "#fbbf24" : "#38bdf8";
         bCtx.font = "bold 12px monospace";
-        const tag = hasStereo ? `O${obj.id} [Z:${obj.z.toFixed(1)}]` : `O${obj.id}`;
+        const tag = hasStereo 
+                       ? `O${obj.id} [${obj.pips} pts | Z:${obj.z.toFixed(1)}]` 
+                       : `O${obj.id} [${obj.pips} pts]`;
         bCtx.fillText(tag, obj.minX, obj.minY - 5);
       });
 
@@ -134,14 +148,16 @@ export function setupVisionModule(wasmExports, memory, batchCanvas, bCtx, hud) {
       bCtx.fillStyle = hasStereo ? "#fbbf24" : "#94a3b8";
       bCtx.fillText("3D-строка W (Z): " + str3d.w, 20, IMG_H - 22);
 
-      hud.innerHTML = `Стерео-Чэн (D-Wasm): <span>${objs1.length} объектов</span> за <span>${dt} ms</span>`;
+      hud.innerHTML = `Авто-Фату (порог: <span>${res1.usedThresh}</span>): <span>${objs1.length} объектов</span> за <span>${dt} ms</span>`;
     } catch (err) {
       hud.innerHTML = '<span class="warn">Ошибка 3D-зрения: ' + err.message + '</span>';
     }
   }
 
   const bindUpload = (id, setter) => {
-    document.getElementById(id).addEventListener('change', (e) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.addEventListener('change', (e) => {
       const file = e.target.files.item(0);
       if (!file) return;
       const reader = new FileReader();
@@ -156,7 +172,12 @@ export function setupVisionModule(wasmExports, memory, batchCanvas, bCtx, hud) {
 
   bindUpload('photo-upload-1', img => { img1 = img; });
   bindUpload('photo-upload-2', img => { img2 = img; });
-  document.getElementById('luma-thresh').addEventListener('input', processScene);
+
+  const sliderEl = document.getElementById('luma-thresh');
+  if (sliderEl) sliderEl.addEventListener('input', processScene);
+
+  const autoEl = document.getElementById('auto-fatou');
+  if (autoEl) autoEl.addEventListener('change', processScene);
 
   return processScene;
 }

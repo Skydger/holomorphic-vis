@@ -68,3 +68,19 @@ int hv_compute_3d_depth(
 ) pure nothrow @nogc {
     return computeStereoDepth(objs1, count1, objs2, count2, out_z);
 }
+
+int hv_auto_threshold(
+    const(uint)* rgba_buffer,
+    int width, int height
+) pure nothrow @nogc {
+    return autoThresholdByFatou(rgba_buffer, width, height);
+}
+
+int hv_count_pips(
+    const(uint)* rgba_buffer,
+    int width, int height,
+    const(DetectedObject)* obj_ptr,
+    int obj_threshold
+) pure nothrow @nogc {
+    return countObjectPips(rgba_buffer, width, height, *obj_ptr, obj_threshold);
+}
